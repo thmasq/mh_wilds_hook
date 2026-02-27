@@ -1,10 +1,11 @@
 use std::ffi::c_void;
 use std::thread;
 use std::time::Duration;
-use windows::Win32::Foundation::{BOOL, FARPROC, HINSTANCE, HWND, TRUE};
+use windows::Win32::Foundation::{FARPROC, HINSTANCE, HWND, TRUE};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
 use windows::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH};
 use windows::Win32::UI::WindowsAndMessaging::FindWindowA;
+use windows::core::BOOL;
 use windows::core::{HRESULT, PCSTR};
 
 mod dx12_hook;

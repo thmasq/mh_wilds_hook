@@ -11,7 +11,7 @@ use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Dxgi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleA;
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::{ComInterface, HRESULT, PCSTR};
+use windows::core::{HRESULT, Interface, PCSTR};
 
 use crate::imgui_dx12::ImGuiDx12Backend;
 
@@ -60,7 +60,7 @@ pub fn init() -> Result<(), Box<dyn std::error::Error>> {
 /// `IDXGISwapChain::Present` and `ID3D12CommandQueue::ExecuteCommandLists`
 fn get_dx12_pointers() -> Option<(usize, usize)> {
     unsafe {
-        let h_inst = GetModuleHandleA(None).unwrap_or(HINSTANCE(0));
+        let h_inst = GetModuleHandleA(None).unwrap_or(HINSTANCE(std::ptr::null_mut()).into());
         let window_class_name = PCSTR(b"MHWDummyWindow\0".as_ptr());
 
         let wc = WNDCLASSA {
@@ -84,7 +84,7 @@ fn get_dx12_pointers() -> Option<(usize, usize)> {
             0,
             100,
             100,
-            HWND(0),
+            Some(HWND(std::ptr::null_mut())),
             Default::default(),
             h_inst,
             None,

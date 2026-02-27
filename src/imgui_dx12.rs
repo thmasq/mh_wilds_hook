@@ -7,8 +7,7 @@ use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Dxgi::IDXGISwapChain3;
-use windows::core::{ComInterface, PCSTR, Result};
-use windows_core::interface::Interface;
+use windows::core::{Interface, PCSTR, Result};
 
 #[repr(C)]
 struct ImDrawVert {
