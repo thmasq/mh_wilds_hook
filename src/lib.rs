@@ -35,7 +35,7 @@ pub extern "system" fn DirectInput8Create(
             return real_func(hinst, dwversion, riidltf, ppvout, punkouter);
         }
     }
-    HRESULT(0x80004001)
+    HRESULT(0x80004001u32 as i32)
 }
 
 #[unsafe(no_mangle)]

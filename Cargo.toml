@@ -13,4 +13,4 @@ lazy_static = "1.5.0"
 log = "0.4.29"
 retour = "0.3.1"
 simplelog = "0.12.2"
-windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_SystemServices", "Win32_System_LibraryLoader", "Win32_System_Console", "Win32_Graphics_Direct3D12", "Win32_Graphics_Direct3D", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input", "Win32_Graphics_Direct3D_Fxc", "Win32_UI_Input_KeyboardAndMouse"] }
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_SystemServices", "Win32_System_LibraryLoader", "Win32_System_Console", "Win32_Graphics_Direct3D12", "Win32_Graphics_Direct3D", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input", "Win32_Graphics_Direct3D_Fxc", "Win32_UI_Input_KeyboardAndMouse", "Win32_Graphics_Gdi"] }

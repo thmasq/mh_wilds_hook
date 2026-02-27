@@ -4,14 +4,14 @@ use std::ffi::c_void;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use windows::Win32::Foundation::{HINSTANCE, HWND};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_11_0;
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Dxgi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleA;
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::{HRESULT, Interface, PCSTR};
+use windows::core::{HRESULT, PCSTR};
 
 use crate::imgui_dx12::ImGuiDx12Backend;
 
@@ -56,17 +56,28 @@ pub fn init() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+unsafe extern "system" fn dummy_wndproc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    unsafe { DefWindowProcA(hwnd, msg, wparam, lparam) }
+}
+
 /// Creates a dummy window and DX12 device to extract the VTable pointers for
 /// `IDXGISwapChain::Present` and `ID3D12CommandQueue::ExecuteCommandLists`
 fn get_dx12_pointers() -> Option<(usize, usize)> {
     unsafe {
-        let h_inst = GetModuleHandleA(None).unwrap_or(HINSTANCE(std::ptr::null_mut()).into());
+        let h_module = GetModuleHandleA(None).unwrap_or_default();
+        let h_inst: HINSTANCE = std::mem::transmute(h_module);
+
         let window_class_name = PCSTR(b"MHWDummyWindow\0".as_ptr());
 
         let wc = WNDCLASSA {
             style: CS_HREDRAW | CS_VREDRAW,
-            lpfnWndProc: Some(DefWindowProcA),
-            hInstance: h_inst.into(),
+            lpfnWndProc: Some(dummy_wndproc),
+            hInstance: h_inst,
             lpszClassName: window_class_name,
             ..Default::default()
         };
@@ -76,7 +87,7 @@ fn get_dx12_pointers() -> Option<(usize, usize)> {
         }
 
         let hwnd = CreateWindowExA(
-            Default::default(),
+            WINDOW_EX_STYLE(0),
             window_class_name,
             PCSTR(b"Dummy\0".as_ptr()),
             WS_OVERLAPPEDWINDOW,
@@ -84,14 +95,15 @@ fn get_dx12_pointers() -> Option<(usize, usize)> {
             0,
             100,
             100,
-            Some(HWND(std::ptr::null_mut())),
-            Default::default(),
-            h_inst,
+            None,
+            None,
+            Some(h_inst),
             None,
         );
 
-        if hwnd.0 == 0 {
-            UnregisterClassA(window_class_name, h_inst);
+        let hwnd_val: usize = std::mem::transmute_copy(&hwnd);
+        if hwnd_val == 0 {
+            let _ = UnregisterClassA(window_class_name, Some(h_inst));
             return None;
         }
 
@@ -99,8 +111,8 @@ fn get_dx12_pointers() -> Option<(usize, usize)> {
 
         let mut device: Option<ID3D12Device> = None;
         if D3D12CreateDevice(None, D3D_FEATURE_LEVEL_11_0, &mut device).is_err() {
-            DestroyWindow(hwnd);
-            UnregisterClassA(window_class_name, h_inst);
+            let _ = DestroyWindow(hwnd.unwrap());
+            let _ = UnregisterClassA(window_class_name, Some(h_inst));
             return None;
         }
         let device = device?;
@@ -128,14 +140,17 @@ fn get_dx12_pointers() -> Option<(usize, usize)> {
             },
             BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
             BufferCount: 2,
-            OutputWindow: hwnd,
+            OutputWindow: hwnd.clone().unwrap(),
             Windowed: true.into(),
             SwapEffect: DXGI_SWAP_EFFECT_FLIP_DISCARD,
             Flags: 0,
         };
 
-        let swap_chain: IDXGISwapChain =
-            factory.CreateSwapChain(&command_queue, &swap_desc).ok()?;
+        let mut swap_chain_opt: Option<IDXGISwapChain> = None;
+        let _ = factory
+            .CreateSwapChain(&command_queue, &swap_desc, &mut swap_chain_opt)
+            .ok();
+        let swap_chain = swap_chain_opt?;
 
         let swap_chain_ptr: *mut c_void = std::mem::transmute_copy(&swap_chain);
         let swap_chain_vtable = *(swap_chain_ptr as *const *const usize);
@@ -145,8 +160,8 @@ fn get_dx12_pointers() -> Option<(usize, usize)> {
         let cmd_queue_vtable = *(cmd_queue_ptr as *const *const usize);
         let exec_cmd_lists_ptr = *cmd_queue_vtable.add(10);
 
-        DestroyWindow(hwnd.expect("Invalid window handle"));
-        UnregisterClassA(window_class_name, h_inst);
+        let _ = DestroyWindow(hwnd.unwrap());
+        let _ = UnregisterClassA(window_class_name, Some(h_inst));
 
         Some((present_ptr, exec_cmd_lists_ptr))
     }
@@ -186,8 +201,7 @@ extern "system" fn hooked_present(
             let mut backend_lock = RENDER_BACKEND.lock().unwrap();
 
             if !IMGUI_INITIALIZED.load(Ordering::SeqCst) {
-                let mut desc = Default::default();
-                if swap_chain.GetDesc().is_ok() {
+                if let Ok(desc) = swap_chain.GetDesc() {
                     let hwnd = desc.OutputWindow;
 
                     println!("[DX12] Initializing ImGui Backend...");
@@ -212,5 +226,5 @@ extern "system" fn hooked_present(
         }
     }
 
-    unsafe { PRESENT_HOOK.call(swap_chain_ptr, sync_interval, flags) }
+    PRESENT_HOOK.call(swap_chain_ptr, sync_interval, flags)
 }

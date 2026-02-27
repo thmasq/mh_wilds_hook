@@ -1,12 +1,15 @@
 use imgui::{Context, DrawData};
 use std::ffi::c_void;
 use std::ptr;
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Direct3D::D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+use windows::Win32::Graphics::Direct3D::Fxc::D3DCOMPILE_ENABLE_STRICTNESS;
+use windows::Win32::Graphics::Direct3D::Fxc::D3DCOMPILE_OPTIMIZATION_LEVEL3;
 use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
+use windows::Win32::Graphics::Direct3D::ID3DBlob;
 use windows::Win32::Graphics::Direct3D12::*;
-use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Dxgi::IDXGISwapChain3;
+use windows::Win32::Graphics::Dxgi::{Common::*, DXGI_SWAP_CHAIN_DESC};
 use windows::core::{Interface, PCSTR, Result};
 
 #[repr(C)]
@@ -16,6 +19,7 @@ struct ImDrawVert {
     col: u32,
 }
 
+#[allow(dead_code)]
 pub struct ImGuiDx12Backend {
     pub imgui_ctx: Context,
     device: ID3D12Device,
@@ -32,6 +36,10 @@ pub struct ImGuiDx12Backend {
     ib_size: usize,
 }
 
+unsafe impl Send for ImGuiDx12Backend {}
+unsafe impl Sync for ImGuiDx12Backend {}
+
+#[allow(dead_code)]
 pub struct FrameResources {
     pub command_allocator: ID3D12CommandAllocator,
     pub render_target: ID3D12Resource,
@@ -40,36 +48,38 @@ pub struct FrameResources {
 
 impl ImGuiDx12Backend {
     pub unsafe fn new(swap_chain: &IDXGISwapChain3, _hwnd: HWND) -> Result<Self> {
-        let device: ID3D12Device = swap_chain.GetDevice()?;
-        let mut desc = Default::default();
-        swap_chain.GetDesc()?;
+        let device: ID3D12Device = unsafe { swap_chain.GetDevice() }?;
+        let desc: DXGI_SWAP_CHAIN_DESC = unsafe { swap_chain.GetDesc() }?;
 
-        let rtv_heap: ID3D12DescriptorHeap =
+        let rtv_heap: ID3D12DescriptorHeap = unsafe {
             device.CreateDescriptorHeap(&D3D12_DESCRIPTOR_HEAP_DESC {
                 Type: D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
                 NumDescriptors: desc.BufferCount,
                 Flags: D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
                 NodeMask: 0,
-            })?;
+            })
+        }?;
 
-        let srv_heap: ID3D12DescriptorHeap =
+        let srv_heap: ID3D12DescriptorHeap = unsafe {
             device.CreateDescriptorHeap(&D3D12_DESCRIPTOR_HEAP_DESC {
                 Type: D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
                 NumDescriptors: 1,
                 Flags: D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
                 NodeMask: 0,
-            })?;
+            })
+        }?;
 
         let mut frames = Vec::new();
         let rtv_size =
-            device.GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV) as usize;
-        let mut rtv_handle = rtv_heap.GetCPUDescriptorHandleForHeapStart();
+            unsafe { device.GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV) }
+                as usize;
+        let mut rtv_handle = unsafe { rtv_heap.GetCPUDescriptorHandleForHeapStart() };
 
         for i in 0..desc.BufferCount {
-            let render_target: ID3D12Resource = swap_chain.GetBuffer(i)?;
-            device.CreateRenderTargetView(&render_target, None, rtv_handle);
+            let render_target: ID3D12Resource = unsafe { swap_chain.GetBuffer(i) }?;
+            unsafe { device.CreateRenderTargetView(&render_target, None, rtv_handle) };
             let command_allocator: ID3D12CommandAllocator =
-                device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT)?;
+                unsafe { device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT) }?;
             frames.push(FrameResources {
                 command_allocator,
                 render_target,
@@ -78,13 +88,15 @@ impl ImGuiDx12Backend {
             rtv_handle.ptr += rtv_size;
         }
 
-        let command_list: ID3D12GraphicsCommandList = device.CreateCommandList(
-            0,
-            D3D12_COMMAND_LIST_TYPE_DIRECT,
-            &frames[0].command_allocator,
-            None,
-        )?;
-        command_list.Close()?;
+        let command_list: ID3D12GraphicsCommandList = unsafe {
+            device.CreateCommandList(
+                0,
+                D3D12_COMMAND_LIST_TYPE_DIRECT,
+                &frames[0].command_allocator,
+                None,
+            )
+        }?;
+        (unsafe { command_list.Close() })?;
 
         let ranges = [D3D12_DESCRIPTOR_RANGE {
             RangeType: D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
@@ -143,16 +155,24 @@ impl ImGuiDx12Backend {
         };
 
         let mut blob = None;
-        windows::Win32::Graphics::Direct3D12::D3D12SerializeRootSignature(
-            &root_sig_desc,
-            D3D_ROOT_SIGNATURE_VERSION_1_0,
-            &mut blob,
-            None,
-        )?;
-        let blob = blob.unwrap();
-        let root_signature: ID3D12RootSignature = device.CreateRootSignature(0, unsafe {
-            std::slice::from_raw_parts(blob.GetBufferPointer() as *const u8, blob.GetBufferSize())
+        (unsafe {
+            windows::Win32::Graphics::Direct3D12::D3D12SerializeRootSignature(
+                &root_sig_desc,
+                D3D_ROOT_SIGNATURE_VERSION_1_0,
+                &mut blob,
+                None,
+            )
         })?;
+        let blob = blob.unwrap();
+        let root_signature: ID3D12RootSignature = unsafe {
+            device.CreateRootSignature(
+                0,
+                std::slice::from_raw_parts(
+                    blob.GetBufferPointer() as *const u8,
+                    blob.GetBufferSize(),
+                ),
+            )
+        }?;
 
         let vs_bytecode = unsafe {
             compile_shader(
@@ -226,7 +246,8 @@ impl ImGuiDx12Backend {
             NumElements: 3,
         };
 
-        let pipeline_state: ID3D12PipelineState = device.CreateGraphicsPipelineState(&pso_desc)?;
+        let pipeline_state: ID3D12PipelineState =
+            unsafe { device.CreateGraphicsPipelineState(&pso_desc) }?;
 
         let vb_size = 5000 * std::mem::size_of::<ImDrawVert>();
         let ib_size = 10000 * std::mem::size_of::<u16>();
@@ -254,28 +275,33 @@ impl ImGuiDx12Backend {
         swap_chain: &IDXGISwapChain3,
         command_queue: &ID3D12CommandQueue,
     ) -> Result<()> {
-        let frame_index = swap_chain.GetCurrentBackBufferIndex() as usize;
+        let frame_index = unsafe { swap_chain.GetCurrentBackBufferIndex() } as usize;
         let frame = &self.frames[frame_index];
 
-        frame.command_allocator.Reset()?;
-        self.command_list
-            .Reset(&frame.command_allocator, &self.pipeline_state)?;
+        unsafe {
+            frame.command_allocator.Reset()?;
+            self.command_list
+                .Reset(&frame.command_allocator, &self.pipeline_state)?;
 
-        self.command_list
-            .OMSetRenderTargets(1, Some(&frame.rtv_handle), false, None);
-        self.command_list
-            .SetDescriptorHeaps(&[Some(self.srv_heap.clone())]);
-        self.command_list
-            .SetGraphicsRootSignature(&self.root_signature);
+            self.command_list
+                .OMSetRenderTargets(1, Some(&frame.rtv_handle), false, None);
+            self.command_list
+                .SetDescriptorHeaps(&[Some(self.srv_heap.clone())]);
+            self.command_list
+                .SetGraphicsRootSignature(&self.root_signature);
+        }
 
         let ui = self.imgui_ctx.frame();
         ui.show_demo_window(&mut true);
+
         let draw_data = self.imgui_ctx.render();
+        let draw_data_ptr = draw_data as *const DrawData;
 
-        (unsafe { self.render_draw_data(draw_data) })?;
-
-        self.command_list.Close()?;
-        command_queue.ExecuteCommandLists(&[Some(self.command_list.cast()?)]);
+        unsafe {
+            self.render_draw_data(&*draw_data_ptr)?;
+            self.command_list.Close()?;
+            command_queue.ExecuteCommandLists(&[Some(self.command_list.cast()?)]);
+        }
         Ok(())
     }
 
@@ -297,8 +323,11 @@ impl ImGuiDx12Backend {
 
         let mut vtx_dst: *mut c_void = ptr::null_mut();
         let mut idx_dst: *mut c_void = ptr::null_mut();
-        self.vertex_buffer.Map(0, None, Some(&mut vtx_dst))?;
-        self.index_buffer.Map(0, None, Some(&mut idx_dst))?;
+
+        unsafe {
+            self.vertex_buffer.Map(0, None, Some(&mut vtx_dst))?;
+            self.index_buffer.Map(0, None, Some(&mut idx_dst))?;
+        }
 
         let mut vtx_offset = 0;
         let mut idx_offset = 0;
@@ -326,8 +355,10 @@ impl ImGuiDx12Backend {
             idx_offset += idx_slice.len() * std::mem::size_of::<u16>();
         }
 
-        self.vertex_buffer.Unmap(0, None);
-        self.index_buffer.Unmap(0, None);
+        unsafe {
+            self.vertex_buffer.Unmap(0, None);
+            self.index_buffer.Unmap(0, None);
+        }
 
         let l = draw_data.display_pos[0];
         let r = draw_data.display_pos[0] + draw_data.display_size[0];
@@ -340,28 +371,32 @@ impl ImGuiDx12Backend {
             [(r + l) / (l - r), (t + b) / (b - t), 0.5, 1.0],
         ];
 
-        self.command_list.SetGraphicsRoot32BitConstants(
-            0,
-            16,
-            &mvp as *const _ as *const c_void,
-            0,
-        );
+        unsafe {
+            self.command_list.SetGraphicsRoot32BitConstants(
+                0,
+                16,
+                &mvp as *const _ as *const c_void,
+                0,
+            )
+        };
 
         let vb_view = D3D12_VERTEX_BUFFER_VIEW {
-            BufferLocation: self.vertex_buffer.GetGPUVirtualAddress(),
+            BufferLocation: unsafe { self.vertex_buffer.GetGPUVirtualAddress() },
             SizeInBytes: self.vb_size as u32,
             StrideInBytes: std::mem::size_of::<ImDrawVert>() as u32,
         };
         let ib_view = D3D12_INDEX_BUFFER_VIEW {
-            BufferLocation: self.index_buffer.GetGPUVirtualAddress(),
+            BufferLocation: unsafe { self.index_buffer.GetGPUVirtualAddress() },
             SizeInBytes: self.ib_size as u32,
             Format: DXGI_FORMAT_R16_UINT,
         };
 
-        self.command_list
-            .IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        self.command_list.IASetVertexBuffers(0, Some(&[vb_view]));
-        self.command_list.IASetIndexBuffer(Some(&ib_view));
+        unsafe {
+            self.command_list
+                .IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            self.command_list.IASetVertexBuffers(0, Some(&[vb_view]));
+            self.command_list.IASetIndexBuffer(Some(&ib_view));
+        }
 
         let mut global_vtx_offset = 0;
         let mut global_idx_offset = 0;
@@ -371,26 +406,29 @@ impl ImGuiDx12Backend {
             for cmd in draw_list.commands() {
                 match cmd {
                     imgui::DrawCmd::Elements { count, cmd_params } => {
-                        let clip_rect = D3D12_RECT {
+                        let clip_rect = RECT {
                             left: (cmd_params.clip_rect[0] - clip_off[0]) as i32,
                             top: (cmd_params.clip_rect[1] - clip_off[1]) as i32,
                             right: (cmd_params.clip_rect[2] - clip_off[0]) as i32,
                             bottom: (cmd_params.clip_rect[3] - clip_off[1]) as i32,
                         };
-                        self.command_list.RSSetScissorRects(&[clip_rect]);
 
-                        self.command_list.SetGraphicsRootDescriptorTable(
-                            1,
-                            self.srv_heap.GetGPUDescriptorHandleForHeapStart(),
-                        );
+                        unsafe {
+                            self.command_list.RSSetScissorRects(&[clip_rect]);
 
-                        self.command_list.DrawIndexedInstanced(
-                            count as u32,
-                            1,
-                            (cmd_params.idx_offset + global_idx_offset) as u32,
-                            (cmd_params.vtx_offset + global_vtx_offset) as i32,
-                            0,
-                        );
+                            self.command_list.SetGraphicsRootDescriptorTable(
+                                1,
+                                self.srv_heap.GetGPUDescriptorHandleForHeapStart(),
+                            );
+
+                            self.command_list.DrawIndexedInstanced(
+                                count as u32,
+                                1,
+                                (cmd_params.idx_offset + global_idx_offset) as u32,
+                                (cmd_params.vtx_offset + global_vtx_offset) as i32,
+                                0,
+                            );
+                        }
                     }
                     _ => {}
                 }
@@ -440,24 +478,26 @@ unsafe fn compile_shader(source: &[u8], target: &[u8]) -> Vec<u8> {
     let mut bytecode: Option<ID3DBlob> = None;
     let mut error_msg: Option<ID3DBlob> = None;
 
-    let hr = D3DCompile(
-        source.as_ptr() as *const c_void,
-        source.len(),
-        PCSTR::null(),             // Optional: Source name for debugging
-        None,                      // Optional: Defines
-        None,                      // Optional: Includes
-        PCSTR(b"main\0".as_ptr()), // Entrypoint function name
-        PCSTR(target.as_ptr()),    // Target profile (vs_5_0 / ps_5_0)
-        D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3, // Compile flags
-        0,                         // Effect flags
-        &mut bytecode,
-        &mut error_msg,
-    );
+    let hr = unsafe {
+        D3DCompile(
+            source.as_ptr() as *const c_void,
+            source.len(),
+            PCSTR::null(),             // Optional: Source name for debugging
+            None,                      // Optional: Defines
+            None,                      // Optional: Includes
+            PCSTR(b"main\0".as_ptr()), // Entrypoint function name
+            PCSTR(target.as_ptr()),    // Target profile (vs_5_0 / ps_5_0)
+            D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3, // Compile flags
+            0,                         // Effect flags
+            &mut bytecode,
+            Some(&mut error_msg),
+        )
+    };
 
     if hr.is_err() {
         if let Some(errors) = error_msg {
-            let err_ptr = errors.GetBufferPointer() as *const u8;
-            let err_size = errors.GetBufferSize();
+            let err_ptr = unsafe { errors.GetBufferPointer() } as *const u8;
+            let err_size = unsafe { errors.GetBufferSize() };
 
             let msg =
                 String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(err_ptr, err_size) });
@@ -471,8 +511,8 @@ unsafe fn compile_shader(source: &[u8], target: &[u8]) -> Vec<u8> {
     }
 
     let blob = bytecode.expect("Shader compilation succeeded but returned no blob.");
-    let ptr = blob.GetBufferPointer() as *const u8;
-    let size = blob.GetBufferSize();
+    let ptr = unsafe { blob.GetBufferPointer() } as *const u8;
+    let size = unsafe { blob.GetBufferSize() };
 
     unsafe { std::slice::from_raw_parts(ptr, size).to_vec() }
 }
