@@ -145,7 +145,7 @@ fn get_dx12_pointers() -> Option<(usize, usize)> {
         let cmd_queue_vtable = *(cmd_queue_ptr as *const *const usize);
         let exec_cmd_lists_ptr = *cmd_queue_vtable.add(10);
 
-        DestroyWindow(hwnd);
+        DestroyWindow(hwnd.expect("Invalid window handle"));
         UnregisterClassA(window_class_name, h_inst);
 
         Some((present_ptr, exec_cmd_lists_ptr))
@@ -168,9 +168,7 @@ extern "system" fn hooked_execute_command_lists(
         }
     }
 
-    unsafe {
-        EXECUTE_COMMAND_LISTS_HOOK.call(command_queue_ptr, num_command_lists, pp_command_lists)
-    }
+    EXECUTE_COMMAND_LISTS_HOOK.call(command_queue_ptr, num_command_lists, pp_command_lists)
 }
 
 /// Hook 1: The Render Loop.
@@ -189,7 +187,7 @@ extern "system" fn hooked_present(
 
             if !IMGUI_INITIALIZED.load(Ordering::SeqCst) {
                 let mut desc = Default::default();
-                if swap_chain.GetDesc(&mut desc).is_ok() {
+                if swap_chain.GetDesc().is_ok() {
                     let hwnd = desc.OutputWindow;
 
                     println!("[DX12] Initializing ImGui Backend...");

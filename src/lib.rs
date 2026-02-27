@@ -21,7 +21,7 @@ type DirectInput8CreateFn = extern "system" fn(
 
 static mut REAL_DINPUT8_CREATE: Option<DirectInput8CreateFn> = None;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn DirectInput8Create(
     hinst: HINSTANCE,
     dwversion: u32,
@@ -37,7 +37,7 @@ pub extern "system" fn DirectInput8Create(
     HRESULT(0x80004001)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[allow(non_snake_case)]
 pub extern "system" fn DllMain(
     _hinst_dll: HINSTANCE,
@@ -73,13 +73,13 @@ fn main_thread() {
     println!("[Main] Waiting for the REngine window to be created...");
 
     let window_class = PCSTR(b"REngine\0".as_ptr());
-    let mut hwnd = HWND(0);
+    let mut hwnd = HWND(std::ptr::null_mut());
 
-    while hwnd.0 == 0 {
+    while hwnd.0 == std::ptr::null_mut() {
         unsafe {
-            hwnd = FindWindowA(window_class, PCSTR::null());
+            hwnd = FindWindowA(window_class, PCSTR::null()).expect("Could not find Window");
         }
-        if hwnd.0 == 0 {
+        if hwnd.0 == std::ptr::null_mut() {
             thread::sleep(Duration::from_millis(500));
         }
     }

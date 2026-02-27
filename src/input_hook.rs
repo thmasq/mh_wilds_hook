@@ -14,11 +14,11 @@ pub fn init() -> Result<(), Box<dyn std::error::Error>> {
             windows::core::PCSTR::null(),
         );
 
-        if hwnd.0 == 0 {
+        if hwnd.unwrap().0 == std::ptr::null_mut() {
             return Err("Could not find REngine window. Is the game running?".into());
         }
 
-        let orig = SetWindowLongPtrA(hwnd, GWLP_WNDPROC, hooked_wndproc as isize);
+        let orig = SetWindowLongPtrA(hwnd?, GWLP_WNDPROC, hooked_wndproc as isize);
         if orig == 0 {
             return Err("Failed to set window long ptr".into());
         }

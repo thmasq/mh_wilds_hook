@@ -8,6 +8,7 @@ use windows::Win32::Graphics::Direct3D12::*;
 use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Dxgi::IDXGISwapChain3;
 use windows::core::{ComInterface, PCSTR, Result};
+use windows_core::interface::Interface;
 
 #[repr(C)]
 struct ImDrawVert {
@@ -42,7 +43,7 @@ impl ImGuiDx12Backend {
     pub unsafe fn new(swap_chain: &IDXGISwapChain3, _hwnd: HWND) -> Result<Self> {
         let device: ID3D12Device = swap_chain.GetDevice()?;
         let mut desc = Default::default();
-        swap_chain.GetDesc(&mut desc)?;
+        swap_chain.GetDesc()?;
 
         let rtv_heap: ID3D12DescriptorHeap =
             device.CreateDescriptorHeap(&D3D12_DESCRIPTOR_HEAP_DESC {
@@ -423,14 +424,16 @@ unsafe fn create_upload_buffer(device: &ID3D12Device, size: usize) -> Result<ID3
         Alignment: 0,
     };
     let mut resource = None;
-    device.CreateCommittedResource(
-        &heap_props,
-        D3D12_HEAP_FLAG_NONE,
-        &desc,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        None,
-        &mut resource,
-    )?;
+    unsafe {
+        device.CreateCommittedResource(
+            &heap_props,
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            None,
+            &mut resource,
+        )?;
+    }
     Ok(resource.unwrap())
 }
 
